@@ -1,0 +1,52 @@
+# NeuralForge Example Pipeline
+name: research_and_code
+version: "1.0"
+description: "Research a topic, generate code, and review it"
+
+nodes:
+  - id: research
+    name: "Web Research"
+    agent: researcher
+    config:
+      query: "Best practices for building {topic}"
+      sources:
+        - google
+        - arxiv
+        - github
+      max_results: 5
+      strategy: merge
+    retry_policy:
+      max_retries: 2
+      backoff_base: 1.0
+
+  - id: generate
+    name: "Code Generation"
+    agent: coder
+    depends_on:
+      - research
+    config:
+      task: "Generate a production-ready implementation based on research"
+      language: python
+      style: oop
+      constraints:
+        - "Must include type hints"
+        - "Must include docstrings"
+        - "Must handle errors gracefully"
+    retry_policy:
+      max_retries: 1
+      backoff_base: 2.0
+    timeout: 120.0
+
+  - id: review
+    name: "Code Review"
+    agent: reviewer
+    depends_on:
+      - generate
+    config:
+      language: python
+      severity_threshold: warning
+      rules:
+        - PY002
+        - PY003
+        - PY004
+        - PY005

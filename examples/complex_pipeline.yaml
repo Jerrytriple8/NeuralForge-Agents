@@ -1,0 +1,82 @@
+# NeuralForge Complex Pipeline — Parallel Research + Code Gen
+name: complex_pipeline
+version: "1.0"
+description: "Multi-source parallel research with staged code generation and review"
+
+nodes:
+  # Phase 1: Parallel Research (independent)
+  - id: research_api
+    name: "API Research"
+    agent: researcher
+    config:
+      query: "REST API design patterns for {topic}"
+      sources: [google, github]
+      max_results: 5
+      strategy: merge
+
+  - id: research_security
+    name: "Security Research"
+    agent: researcher
+    config:
+      query: "Security vulnerabilities and best practices for {topic}"
+      sources: [google, arxiv]
+      max_results: 5
+      strategy: merge
+
+  - id: research_performance
+    name: "Performance Research"
+    agent: researcher
+    config:
+      query: "Performance optimization techniques for {topic}"
+      sources: [google, arxiv]
+      max_results: 3
+      strategy: merge
+
+  # Phase 2: Code Generation (depends on all research)
+  - id: generate_core
+    name: "Core Implementation"
+    agent: coder
+    depends_on: [research_api, research_security, research_performance]
+    config:
+      task: "Generate core module incorporating API, security, and performance research"
+      language: python
+      style: oop
+      constraints:
+        - "Must follow REST conventions from API research"
+        - "Must address security concerns from security research"
+        - "Must implement optimizations from performance research"
+    timeout: 180.0
+
+  - id: generate_tests
+    name: "Test Generation"
+    agent: coder
+    depends_on: [generate_core]
+    config:
+      task: "Generate comprehensive test suite for the core implementation"
+      language: python
+      style: functional
+      constraints:
+        - "Must include unit tests"
+        - "Must include integration tests"
+        - "Must test error paths"
+
+  # Phase 3: Review
+  - id: review_core
+    name: "Core Code Review"
+    agent: reviewer
+    depends_on: [generate_core]
+    config:
+      language: python
+      severity_threshold: info
+
+  - id: review_tests
+    name: "Test Code Review"
+    agent: reviewer
+    depends_on: [generate_tests]
+    config:
+      language: python
+      severity_threshold: warning
+      rules:
+        - PY002
+        - PY003
+        - PY005
