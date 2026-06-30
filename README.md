@@ -1,133 +1,172 @@
 # NeuralForge
 
-**AI Pipeline Orchestration Framework** — DAG-based execution engine with intelligent agents, middleware stack, and real-time observability.
+**AI Agent Orchestration Framework**
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                    NeuralForge CLI                    │
-├──────────┬──────────┬──────────┬────────────────────┤
-│  DAG     │  Agent   │ Pipeline │  Observability     │
-│  Engine  │  System  │ Loader   │  (tracing/metrics) │
-├──────────┴──────────┴──────────┴────────────────────┤
-│               Middleware Stack                        │
-│  (cache | rate limiter | retry | circuit breaker)    │
-├──────────────────────────────────────────────────────┤
-│            Web Dashboard (FastAPI + WS)               │
-└──────────────────────────────────────────────────────┘
-```
+NeuralForge is a comprehensive framework for building, orchestrating, and monitoring AI agent pipelines with built-in neural network capabilities.
 
 ## Features
 
-- **DAG Execution Engine** — Topology-sorted, parallel node execution with dependency resolution
-- **Intelligent Agents** — Plugin-based agent system with capabilities (research, code gen, review)
-- **Pipeline DSL** — YAML-based pipeline definitions with validation
-- **Middleware Stack** — Cache (LRU/TTL), rate limiter, retry with backoff, circuit breaker
-- **Observability** — Distributed tracing, Prometheus-style metrics, structured JSON logging
-- **Web Dashboard** — Real-time monitoring via FastAPI + WebSocket
-- **CLI** — Full-featured CLI with Typer (run, validate, templates, scaffold, serve)
+- **Multi-Agent System**: Research, Code, and Critic agents working together
+- **Neural Network Engine**: From-scratch implementation with multiple optimizers
+- **Pipeline Orchestration**: Complex workflow management with dependencies
+- **Observability**: Distributed tracing, metrics, and structured logging
+- **REST API**: FastAPI-based monitoring and control interface
+- **CLI Tools**: Command-line interface for quick operations
 
 ## Quick Start
 
 ```bash
 # Install
-pip install -e ".[all]"
+pip install -e .
 
-# Run a pipeline
-neuralforge run examples/basic_pipeline.yaml --context '{"topic": "async Python"}'
+# Run CLI
+neuralforge version
+neuralforge agents
+neuralforge train --epochs 100
 
-# Validate without executing
-neuralforge validate examples/basic_pipeline.yaml
-
-# List templates
-neuralforge templates
-
-# Generate from template
-neuralforge scaffold research_and_code -o my_pipeline.yaml
-
-# Start monitoring dashboard
-neuralforge serve --port 8080
+# Start API server
+neuralforge serve --port 8000
 ```
 
-## Pipeline YAML Format
+## Architecture
 
-```yaml
-name: my_pipeline
-version: "1.0"
-nodes:
-  - id: research
-    agent: researcher
-    config:
-      query: "Research {topic}"
-      sources: [google, arxiv]
-
-  - id: generate
-    agent: coder
-    depends_on: [research]
-    config:
-      task: "Generate code from research"
-      language: python
-
-  - id: review
-    agent: reviewer
-    depends_on: [generate]
-    config:
-      language: python
-      severity_threshold: warning
+```
+neuralforge/
+├── core/           # Neural network, engine, memory
+├── agents/         # AI agent implementations
+├── pipeline/       # Workflow orchestration
+├── observability/  # Tracing, metrics, logging
+├── api/            # FastAPI server
+├── cli/            # Command-line interface
+├── tests/          # Test suite
+├── configs/        # Configuration files
+└── examples/       # Usage examples
 ```
 
-## Custom Agents
+## Usage Examples
+
+### Neural Network Training
 
 ```python
-from neuralforge.agents.base import BaseAgent, AgentCapability
+from core import NeuralNetwork
+from core.neural_net import LayerConfig
+from core.optimizer import Adam
+import numpy as np
 
-class MyAgent(BaseAgent):
-    @property
-    def name(self) -> str:
-        return "my_agent"
+# Create network
+nn = NeuralNetwork()
+nn.add_layer(LayerConfig(input_size=2, output_size=8, activation="relu"))
+nn.add_layer(LayerConfig(input_size=8, output_size=1, activation="sigmoid"))
+nn.set_loss("mse")
+nn.set_optimizer(Adam(lr=0.01))
 
-    @property
-    def capabilities(self) -> list[AgentCapability]:
-        return [AgentCapability.CUSTOM]
-
-    async def execute(self, config, dependencies, context):
-        return {"result": "processed"}
+# Train
+X = np.array([[0,0], [0,1], [1,0], [1,1]])
+y = np.array([[0], [1], [1], [0]])
+nn.fit(X, y, epochs=500, verbose=True)
 ```
 
-## Built-in Agents
-
-| Agent       | Capabilities                           |
-|-------------|----------------------------------------|
-| Researcher  | Web search, data synthesis             |
-| Coder       | Code generation (Python, JS, Go, Rust) |
-| Reviewer    | Static analysis, pattern detection     |
-
-## Middleware
+### Multi-Agent Pipeline
 
 ```python
-from neuralforge.middleware import LRUCache, TokenBucketRateLimiter, RetryPolicy, CircuitBreaker
+import asyncio
+from core import NeuralEngine
+from agents import ResearchAgent, CoderAgent, CriticAgent
 
-# LRU Cache with TTL
-cache = LRUCache(capacity=1000)
+async def main():
+    engine = NeuralEngine()
+    engine.register_agent("researcher", ResearchAgent())
+    engine.register_agent("coder", CoderAgent())
+    engine.register_agent("critic", CriticAgent())
 
-# Rate Limiter
-limiter = TokenBucketRateLimiter(rate=100, burst=50)
+    # Run research
+    task = await engine.submit_task("researcher", {
+        "task": "analyze",
+        "data": "Your text here"
+    })
+    await asyncio.sleep(1)
+    result = engine.get_task(task.task_id)
+    print(result.result.output)
 
-# Retry with exponential backoff
-policy = RetryPolicy(max_retries=3, base_delay=1.0)
-
-# Circuit Breaker
-breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
+asyncio.run(main())
 ```
+
+### Pipeline Workflow
+
+```python
+from pipeline import Workflow
+
+wf = Workflow("analysis")
+wf.transform("load", lambda ctx: load_data())
+wf.filter("clean", lambda x: x is not None, depends_on=["load"])
+wf.transform("process", lambda ctx: process(ctx["clean"]), depends_on=["clean"])
+
+result = await wf.execute()
+```
+
+## Agents
+
+| Agent | Purpose | Capabilities |
+|-------|---------|--------------|
+| Researcher | Information gathering | Analysis, extraction, summarization |
+| Coder | Code generation | Generation, refactoring, debugging |
+| Critic | Quality assessment | Scoring, comparison, bias detection |
+
+## Neural Network
+
+- **Activations**: ReLU, Sigmoid, Tanh, LeakyReLU, Softmax, Swish
+- **Losses**: MSE, Cross-Entropy, Binary Cross-Entropy
+- **Optimizers**: Adam, SGD (with momentum), AdaGrad, RMSProp
+- **Features**: Dropout, Batch Normalization, He initialization
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Root info |
+| GET | `/health` | Health check |
+| GET | `/agents` | List agents |
+| POST | `/tasks` | Submit task |
+| GET | `/tasks/{id}` | Get task status |
+| GET | `/stats` | Engine statistics |
+| GET | `/metrics` | Metrics data |
+| GET | `/traces` | Trace data |
 
 ## Testing
 
 ```bash
-pip install -e ".[dev]"
-pytest -v
+# Run all tests
+pytest tests/ -v
+
+# Run specific test
+pytest tests/test_engine.py -v
+
+# Run with coverage
+pytest tests/ --cov=neuralforge
+```
+
+## Configuration
+
+Edit `configs/default.yaml` to customize:
+
+```yaml
+engine:
+  max_concurrent_tasks: 10
+  timeout: 300.0
+  enable_caching: true
+
+neural_network:
+  default_optimizer: adam
+  default_lr: 0.001
 ```
 
 ## License
 
-MIT
+MIT License - see LICENSE file
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch
+3. Add tests
+4. Submit pull request

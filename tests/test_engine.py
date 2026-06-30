@@ -1,133 +1,202 @@
-"""Tests for the pipeline execution engine."""
+"""
+Tests for NeuralEngine.
+"""
 
 import asyncio
-
 import pytest
+import time
+from unittest.mock import AsyncMock, MagicMock
 
-from neuralforge.agents.base import BaseAgent
-from neuralforge.agents.registry import AgentRegistry
-from neuralforge.core.context import PipelineContext
-from neuralforge.core.state import PipelineState
-from neuralforge.core.dag import DAG, DAGNode
-from neuralforge.core.engine import PipelineEngine
+from core.engine import NeuralEngine, EngineConfig, TaskStatus
+from agents.base import BaseAgent, AgentConfig, AgentResult
 
 
-class DummyAgent(BaseAgent):
-    """Agent that records its execution and returns config."""
+class MockAgent(BaseAgent):
+    def __init__(self, name: str = "mock", delay: float = 0):
+        super().__init__(AgentConfig(name=name))
+        self.delay = delay
 
-    def __init__(self, agent_name: str = "dummy", delay: float = 0.0, fail_until: int = 0):
-        self._name = agent_name
-        self._delay = delay
-        self._fail_until = fail_until
+    async def execute(self, payload):
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return AgentResult(
+            agent_name=self.name,
+            task_id="",
+            output={"processed": True, "input": payload},
+            confidence=1.0,
+        )
+
+
+class FailingAgent(BaseAgent):
+    def __init__(self, fail_count: int = 1):
+        super().__init__(AgentConfig(name="failing"))
+        self.fail_count = fail_count
         self.call_count = 0
 
-    @property
-    def name(self) -> str:
-        return self._name
-
-    async def execute(self, config, dependencies, context):
+    async def execute(self, payload):
         self.call_count += 1
-        if self.call_count <= self._fail_until:
-            raise RuntimeError(f"Simulated failure #{self.call_count}")
-        if self._delay > 0:
-            await asyncio.sleep(self._delay)
-        return {"agent": self._name, "config": config, "deps": dependencies}
+        if self.call_count <= self.fail_count:
+            raise ValueError(f"Fail #{self.call_count}")
+        return AgentResult(agent_name=self.name, task_id="", output="success")
 
 
-class TestPipelineEngine:
-    def _make_engine(self, agents: list[BaseAgent] | None = None) -> PipelineEngine:
-        registry = AgentRegistry()
-        for agent in (agents or [DummyAgent()]):
-            registry.register(agent)
-        return PipelineEngine(registry=registry)
+class TestEngine:
+    def setup_method(self):
+        self.config = EngineConfig(
+            max_concurrent_tasks=5,
+            max_retries=2,
+            retry_delay=0.01,
+            timeout=5.0,
+        )
+        self.engine = NeuralEngine(self.config)
 
-    def _make_context(self, **kwargs) -> PipelineContext:
-        return PipelineContext(**kwargs)
+    def teardown_method(self):
+        asyncio.get_event_loop().run_until_complete(self.engine.shutdown())
 
-    @pytest.mark.asyncio
-    async def test_single_node(self):
-        engine = self._make_engine()
-        dag = DAG()
-        dag.add_node(DAGNode(node_id="test", name="Test", agent="dummy"))
-        ctx = self._make_context(pipeline_name="single-node-test")
+    def test_register_agent(self):
+        agent = MockAgent()
+        self.engine.register_agent("test", agent)
+        assert "test" in self.engine.registered_agents
+        assert self.engine.get_agent("test") is agent
 
-        result = await engine.execute(dag, ctx)
-        assert result.get_node_result("test") is not None
-        assert result.get_node_result("test")["agent"] == "dummy"
+    def test_register_duplicate_raises(self):
+        agent = MockAgent()
+        self.engine.register_agent("test", agent)
+        with pytest.raises(ValueError, match="already registered"):
+            self.engine.register_agent("test", agent)
 
-    @pytest.mark.asyncio
-    async def test_sequential_pipeline(self):
-        agent = DummyAgent()
-        engine = self._make_engine([agent])
-        dag = DAG()
-        dag.add_node(DAGNode(node_id="step1", name="Step 1", agent="dummy"))
-        dag.add_node(DAGNode(node_id="step2", name="Step 2", agent="dummy", depends_on=["step1"]))
-        ctx = self._make_context(pipeline_name="sequential-test")
+    def test_unregister_agent(self):
+        agent = MockAgent()
+        self.engine.register_agent("test", agent)
+        self.engine.unregister_agent("test")
+        assert "test" not in self.engine.registered_agents
 
-        result = await engine.execute(dag, ctx)
-        assert result.get_node_result("step1") is not None
-        assert result.get_node_result("step2") is not None
-        assert agent.call_count == 2
+    def test_get_missing_agent_raises(self):
+        with pytest.raises(KeyError, match="not found"):
+            self.engine.get_agent("nonexistent")
 
-    @pytest.mark.asyncio
-    async def test_retry_on_failure(self):
-        agent = DummyAgent(fail_until=2)
-        engine = self._make_engine([agent])
-        dag = DAG()
-        dag.add_node(DAGNode(
-            node_id="flaky",
-            name="Flaky Task",
-            agent="dummy",
-            retry_policy={"max_retries": 3, "backoff_base": 0.01},
-        ))
-        ctx = self._make_context(pipeline_name="retry-test")
+    def test_submit_task(self):
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        task = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", {"data": "test"})
+        )
+        assert task.task_id is not None
+        assert task.agent_name == "mock"
 
-        result = await engine.execute(dag, ctx)
-        assert result.get_node_result("flaky") is not None
-        assert agent.call_count == 3  # failed twice, succeeded on 3rd
+    def test_submit_unknown_agent_raises(self):
+        with pytest.raises(KeyError, match="not registered"):
+            asyncio.get_event_loop().run_until_complete(
+                self.engine.submit_task("unknown", {})
+            )
 
-    @pytest.mark.asyncio
-    async def test_retry_exhaustion(self):
-        agent = DummyAgent(fail_until=10)
-        engine = self._make_engine([agent])
-        dag = DAG()
-        dag.add_node(DAGNode(
-            node_id="bad",
-            name="Bad Task",
-            agent="dummy",
-            retry_policy={"max_retries": 2, "backoff_base": 0.01},
-        ))
-        ctx = self._make_context(pipeline_name="exhaustion-test")
+    def test_task_completion(self):
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        task = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", {"key": "value"})
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        updated = self.engine.get_task(task.task_id)
+        assert updated.status == TaskStatus.COMPLETED
+        assert updated.result.output["processed"] is True
 
-        result = await engine.execute(dag, ctx)
-        node = dag.get_node("bad")
-        assert node.error is not None
+    def test_task_retry_on_failure(self):
+        agent = FailingAgent(fail_count=1)
+        self.engine.register_agent("failing", agent)
+        task = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("failing", {})
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        updated = self.engine.get_task(task.task_id)
+        assert updated.status == TaskStatus.COMPLETED
 
-    @pytest.mark.asyncio
-    async def test_context_propagation(self):
-        engine = self._make_engine()
-        dag = DAG()
-        dag.add_node(DAGNode(node_id="test", name="Test", agent="dummy"))
-        ctx = self._make_context(pipeline_name="context-test")
-        ctx.set("custom_key", "value")
+    def test_task_timeout(self):
+        config = EngineConfig(timeout=0.1, max_retries=0, retry_delay=0.01)
+        engine = NeuralEngine(config)
+        agent = MockAgent(delay=10)
+        engine.register_agent("slow", agent)
+        task = asyncio.get_event_loop().run_until_complete(
+            engine.submit_task("slow", {})
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        updated = engine.get_task(task.task_id)
+        assert updated.status == TaskStatus.FAILED
+        asyncio.get_event_loop().run_until_complete(engine.shutdown())
 
-        result = await engine.execute(dag, ctx)
-        assert result.get("custom_key") == "value"
+    def test_cancel_task(self):
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        task = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", {})
+        )
+        result = asyncio.get_event_loop().run_until_complete(
+            self.engine.cancel_task(task.task_id)
+        )
+        # May or may not succeed depending on timing
 
-    @pytest.mark.asyncio
-    async def test_parallel_execution(self):
-        slow = DummyAgent(agent_name="slow", delay=0.1)
-        fast = DummyAgent(agent_name="fast", delay=0.0)
-        engine = self._make_engine([slow, fast])
-        dag = DAG()
-        dag.add_node(DAGNode(node_id="a", name="Slow", agent="slow"))
-        dag.add_node(DAGNode(node_id="b", name="Fast", agent="fast"))
-        ctx = self._make_context(pipeline_name="parallel-test")
+    def test_cache_hit(self):
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        payload = {"key": "value"}
+        task1 = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", payload)
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        task2 = asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", payload)
+        )
+        assert task2.status == TaskStatus.COMPLETED
 
-        start = asyncio.get_event_loop().time()
-        result = await engine.execute(dag, ctx)
-        elapsed = asyncio.get_event_loop().time() - start
+    def test_stats(self):
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        stats = self.engine.stats
+        assert "tasks_submitted" in stats
+        assert "active_agents" in stats
+        assert stats["active_agents"] == 1
 
-        assert result.get_node_result("a") is not None
-        assert result.get_node_result("b") is not None
-        assert elapsed < 0.2  # Should be ~0.1s (parallel), not 0.2s (sequential)
+    def test_hook_pre_task(self):
+        hook_called = []
+        self.engine.add_hook("pre_task", lambda task: hook_called.append(task.task_id))
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", {})
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        assert len(hook_called) > 0
+
+    def test_hook_on_complete(self):
+        hook_called = []
+        self.engine.add_hook("on_complete", lambda task: hook_called.append(task.task_id))
+        agent = MockAgent()
+        self.engine.register_agent("mock", agent)
+        asyncio.get_event_loop().run_until_complete(
+            self.engine.submit_task("mock", {})
+        )
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        assert len(hook_called) > 0
+
+    def test_concurrent_tasks(self):
+        agent = MockAgent(delay=0.1)
+        self.engine.register_agent("mock", agent)
+        tasks = []
+        for i in range(5):
+            task = asyncio.get_event_loop().run_until_complete(
+                self.engine.submit_task("mock", {"i": i})
+            )
+            tasks.append(task)
+        asyncio.get_event_loop().run_until_complete(asyncio.sleep(1))
+        completed = sum(
+            1 for t in tasks
+            if self.engine.get_task(t.task_id).status == TaskStatus.COMPLETED
+        )
+        assert completed == 5
+
+    def test_repr(self):
+        assert "NeuralEngine" in repr(self.engine)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

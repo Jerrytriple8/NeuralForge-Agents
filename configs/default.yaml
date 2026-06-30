@@ -1,0 +1,61 @@
+# NeuralForge Configuration
+
+engine:
+  max_concurrent_tasks: 10
+  max_retries: 3
+  retry_delay: 1.0
+  timeout: 300.0
+  enable_caching: true
+  cache_ttl: 3600.0
+  log_level: INFO
+  worker_threads: 4
+
+agents:
+  researcher:
+    description: "Analyzes tasks and gathers information"
+    timeout: 60.0
+    max_retries: 2
+
+  coder:
+    description: "Generates, refactors, and debugs code"
+    timeout: 120.0
+    max_retries: 3
+
+  critic:
+    description: "Reviews and scores outputs"
+    timeout: 30.0
+    max_retries: 1
+
+pipeline:
+  max_steps: 50
+  fail_fast: true
+  parallel_execution: true
+
+observability:
+  tracing:
+    enabled: true
+    service_name: neuralforge
+    sample_rate: 1.0
+
+  metrics:
+    enabled: true
+    export_interval: 60
+
+  logging:
+    level: INFO
+    format: json
+    structured: true
+
+neural_network:
+  default_optimizer: adam
+  default_lr: 0.001
+  default_batch_size: 32
+  default_epochs: 100
+  weight_init: he
+  dropout: 0.1
+
+api:
+  host: 0.0.0.0
+  port: 8000
+  cors_origins: ["*"]
+  rate_limit: 100

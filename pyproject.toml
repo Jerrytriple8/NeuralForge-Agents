@@ -1,56 +1,48 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "neuralforge"
-version = "0.1.0"
-description = "AI Pipeline Orchestration Framework — DAG-based execution engine with intelligent agents, middleware stack, and observability."
+version = "2.0.0"
+description = "AI Agent Orchestration Framework"
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.11"
-authors = [{ name = "NeuralForge Contributors" }]
-keywords = ["ai", "pipeline", "orchestration", "dag", "agents"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Framework :: AsyncIO",
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "NeuralForge Team", email = "team@neuralforge.ai"},
 ]
-
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "pyyaml>=6.0",
+    "numpy>=1.19.0",
 ]
 
 [project.optional-dependencies]
-cli = ["typer>=0.12"]
-web = ["fastapi>=0.110", "uvicorn>=0.27"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
-all = ["neuralforge[cli,web,dev]"]
+api = ["fastapi>=0.68.0", "uvicorn>=0.15.0"]
+cli = ["typer>=0.4.0"]
+dev = ["pytest>=6.0", "pytest-asyncio>=0.15.0"]
+all = ["fastapi>=0.68.0", "uvicorn>=0.15.0", "typer>=0.4.0", "pyyaml>=5.4"]
 
 [project.scripts]
-neuralforge = "neuralforge.cli.main:main"
-
-[project.urls]
-Homepage = "https://github.com/sickagents/neuralforge"
-Documentation = "https://github.com/sickagents/neuralforge#readme"
-Repository = "https://github.com/sickagents/neuralforge"
-Issues = "https://github.com/sickagents/neuralforge/issues"
-
-[tool.hatch.build.targets.wheel]
-packages = ["neuralforge"]
+neuralforge = "cli.main:cli"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
-[tool.ruff]
+[tool.black]
 line-length = 100
-target-version = "py311"
+target-version = ["py38"]
 
-[tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B"]
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true

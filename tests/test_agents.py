@@ -1,132 +1,177 @@
-"""Tests for agent system."""
+"""
+Tests for agents.
+"""
 
 import asyncio
 import pytest
-
-from neuralforge.agents.base import BaseAgent, AgentCapability
-from neuralforge.agents.registry import AgentRegistry, AgentNotFound, AgentAlreadyRegistered
-from neuralforge.agents.researcher import ResearchAgent
-from neuralforge.agents.coder import CoderAgent
-from neuralforge.agents.reviewer import ReviewAgent
-from neuralforge.core.context import PipelineContext
+from agents.base import BaseAgent, AgentConfig, AgentResult
+from agents.researcher import ResearchAgent
+from agents.coder import CoderAgent
+from agents.critic import CriticAgent
 
 
-class TestAgentRegistry:
-    def test_register_and_get(self):
-        registry = AgentRegistry()
-        agent = ResearchAgent()
-        registry.register(agent)
-        assert registry.get("researcher") is agent
+class TestBaseAgent:
+    def test_agent_config(self):
+        config = AgentConfig(name="test", description="Test agent")
+        assert config.name == "test"
+        assert config.description == "Test agent"
 
-    def test_duplicate_raises(self):
-        registry = AgentRegistry()
-        registry.register(ResearchAgent())
-        with pytest.raises(AgentAlreadyRegistered):
-            registry.register(ResearchAgent())
-
-    def test_not_found_raises(self):
-        registry = AgentRegistry()
-        with pytest.raises(AgentNotFound):
-            registry.get("nonexistent")
-
-    def test_register_many(self):
-        registry = AgentRegistry()
-        registry.register_many([ResearchAgent(), CoderAgent(), ReviewAgent()])
-        assert len(registry) == 3
-
-    def test_names(self):
-        registry = AgentRegistry()
-        registry.register(ResearchAgent())
-        assert "researcher" in registry.names
-
-    def test_by_capability(self):
-        registry = AgentRegistry()
-        registry.register(ResearchAgent())
-        registry.register(CoderAgent())
-        agents = registry.by_capability(AgentCapability.WEB_SEARCH)
-        assert len(agents) == 1
-        assert agents[0].name == "researcher"
-
-    def test_factory_registration(self):
-        registry = AgentRegistry()
-        registry.register_factory("researcher", ResearchAgent)
-        assert "researcher" in registry
-        agent = registry.get("researcher")
-        assert isinstance(agent, ResearchAgent)
-
-    def test_decorator_registration(self):
-        registry = AgentRegistry()
-
-        @registry.agent("custom")
-        class CustomAgent(BaseAgent):
-            @property
-            def name(self):
-                return "custom"
-
-            async def execute(self, config, dependencies, context):
-                return "ok"
-
-        assert "custom" in registry
+    def test_agent_result(self):
+        result = AgentResult(
+            agent_name="test", task_id="123", output="data", confidence=0.9
+        )
+        assert result.agent_name == "test"
+        assert result.confidence == 0.9
 
 
 class TestResearchAgent:
-    @pytest.mark.asyncio
-    async def test_execute(self):
-        agent = ResearchAgent()
-        ctx = PipelineContext(pipeline_id="test")
-        result = await agent.execute(
-            {"query": "test", "sources": ["src1"], "max_results": 3},
-            {},
-            ctx,
-        )
-        assert result["count"] > 0
-        assert result["sources_queried"] == 1
+    def setup_method(self):
+        self.agent = ResearchAgent()
 
-    def test_validate_config(self):
-        agent = ResearchAgent()
-        errors = agent.validate_config({})
-        assert len(errors) > 0
+    def test_analyze(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "analyze", "data": "This is a test sentence with keywords."})
+        )
+        assert result.output["word_count"] > 0
+        assert "keywords" in result.output
+
+    def test_extract_patterns(self):
+        data = "Email: test@example.com, URL: https://example.com, IP: 192.168.1.1"
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "extract", "data": data})
+        )
+        assert len(result.output["patterns"]["emails"]) > 0
+        assert len(result.output["patterns"]["urls"]) > 0
+
+    def test_summarize(self):
+        data = "First sentence here. Second sentence there. Third sentence everywhere. Fourth sentence nowhere."
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "summarize", "data": data})
+        )
+        assert "summary" in result.output
+        assert result.output["compression_ratio"] < 1.0
+
+    def test_search_knowledge(self):
+        self.agent.add_knowledge("python", "A programming language")
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "search", "data": "python"})
+        )
+        assert result.output["result_count"] > 0
 
 
 class TestCoderAgent:
-    @pytest.mark.asyncio
-    async def test_execute(self):
-        agent = CoderAgent()
-        ctx = PipelineContext(pipeline_id="test")
-        result = await agent.execute(
-            {"task": "generate a function", "language": "python"},
-            {},
-            ctx,
+    def setup_method(self):
+        self.agent = CoderAgent()
+
+    def test_generate_python(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "generate",
+                "language": "python",
+                "spec": {
+                    "name": "add",
+                    "description": "Add two numbers",
+                    "parameters": [
+                        {"name": "a", "type": "int"},
+                        {"name": "b", "type": "int"},
+                    ],
+                    "body": ["return a + b"],
+                },
+            })
         )
-        assert "code" in result
-        assert result["language"] == "python"
-        assert result["lines"] > 0
+        assert "def add" in result.output["code"]
+        assert result.output["syntax_valid"]
+
+    def test_generate_javascript(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "generate",
+                "language": "javascript",
+                "spec": {
+                    "name": "add",
+                    "description": "Add two numbers",
+                    "parameters": [{"name": "a"}, {"name": "b"}],
+                    "body": ["return a + b;"],
+                },
+            })
+        )
+        assert "function add" in result.output["code"]
+
+    def test_debug(self):
+        code = "def f():\n    return 1/0"
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "debug",
+                "code": code,
+                "spec": {"error": "ZeroDivisionError: division by zero"},
+            })
+        )
+        assert len(result.output["issues"]) > 0
+
+    def test_review(self):
+        code = "def f():\n    return 1"
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "review", "code": code})
+        )
+        assert "score" in result.output
+        assert 0 <= result.output["score"] <= 100
+
+    def test_explain(self):
+        code = "def hello():\n    print('Hello')"
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "explain", "code": code})
+        )
+        assert len(result.output["explanation"]) > 0
 
 
-class TestReviewAgent:
-    @pytest.mark.asyncio
-    async def test_review_clean_code(self):
-        agent = ReviewAgent()
-        ctx = PipelineContext(pipeline_id="test")
-        result = await agent.execute(
-            {"code": "x = 1\ny = 2\nprint(x + y)", "language": "python"},
-            {},
-            ctx,
-        )
-        assert "findings" in result
-        assert "score" in result
+class TestCriticAgent:
+    def setup_method(self):
+        self.agent = CriticAgent()
 
-    @pytest.mark.asyncio
-    async def test_review_code_with_issues(self):
-        agent = ReviewAgent()
-        ctx = PipelineContext(pipeline_id="test")
-        code = 'try:\n    pass\nexcept:\n    pass\napi_key = "sk-1234567890abcdef"'
-        result = await agent.execute(
-            {"code": code, "language": "python", "severity_threshold": "info"},
-            {},
-            ctx,
+    def test_score_output(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "score",
+                "output": "This is a well-written response with specific details.",
+                "criteria": {"min_length": 10},
+            })
         )
-        assert result["finding_count"] > 0
-        rule_ids = {f["rule_id"] for f in result["findings"]}
-        assert "PY002" in rule_ids  # bare except
-        assert "PY005" in rule_ids  # hardcoded secret
+        assert 0 <= result.output["overall_score"] <= 1
+
+    def test_compare_outputs(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "compare",
+                "outputs": [
+                    "Short answer",
+                    "A much longer and more detailed answer with specific information",
+                ],
+                "criteria": {"min_length": 20},
+            })
+        )
+        assert "rankings" in result.output
+        assert len(result.output["rankings"]) == 2
+
+    def test_detect_bias(self):
+        text = "Obviously this is always the best solution. Everyone knows this."
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({"task": "detect_bias", "output": text})
+        )
+        assert result.output["bias_score"] > 0
+
+    def test_check_completeness(self):
+        result = asyncio.get_event_loop().run_until_complete(
+            self.agent.execute({
+                "task": "completeness",
+                "output": "This covers topic A and topic B thoroughly.",
+                "criteria": {
+                    "required_elements": ["topic A", "topic B", "topic C"],
+                    "min_length": 20,
+                },
+            })
+        )
+        assert result.output["coverage"] < 1.0  # Missing topic C
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
